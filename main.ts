@@ -9,6 +9,9 @@
 //
 //   1. Ignition: the close is at least 0.8% above the close 5 bars ago
 //      (a genuine 5-minute surge, not noise: 1-minute moves over 26 bps are rare).
+//      It fires only on the bar the surge first appears (rising edge): a signal
+//      that is still true bars later is a move already under way, not a fresh
+//      entry, and chasing it pays the move's top instead of its start.
 //   2. Donchian breakout: the close beats every close of the previous 90 bars
 //      (a new 90-minute high after consolidation).
 //
@@ -45,6 +48,8 @@ const MAX_SLIPPAGE_BPS = 100;
 const closes: bigint[] = [];
 /** Highest close since the current entry; null when flat. */
 let peakSinceEntry: bigint | null = null;
+/** Whether the ignition condition held on the previous bar (for its rising edge). */
+let ignitionHeld = false;
 
 function ignition(i: number): boolean {
   if (i < IGNITION_BARS) return false;
@@ -86,7 +91,11 @@ await runBars({
     }
 
     peakSinceEntry = null;
-    if (ignition(i) || donchianBreakout(i)) {
+    const ignNow = ignition(i);
+    // Rising edge only: a fresh surge, not a stale one still true bars later.
+    const ignFresh = ignNow && !ignitionHeld;
+    ignitionHeld = ignNow;
+    if (ignFresh || donchianBreakout(i)) {
       // Full cash, capped by the weight room; below the minimum notional, buy nothing.
       const room = state.weightRoom(SYMBOL);
       const notional = state.cash < room ? state.cash : room;
